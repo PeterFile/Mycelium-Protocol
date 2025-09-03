@@ -1,0 +1,29 @@
+# Node dependencies
+node_modules/
+/smart-contract/node_modules/
+/sdk-js/node_modules/
+
+# Python artifacts
+__pycache__/
+*.pyc
+/sdk-py/dist/
+/sdk-py/build/
+/sdk-py/*.egg-info/
+
+# Environment files
+.env
+/smart-contract/.env
+/sdk-js/.env
+/sdk-py/.env
+
+# Hardhat artifacts
+/smart-contract/artifacts/
+/smart-contract/cache/
+/smart-contract/coverage/
+/smart-contract/coverage.json
+/smart-contract/typechain-types/
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
