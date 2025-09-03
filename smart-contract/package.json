@@ -1,7 +1,6 @@
 {
   "name": "smart-contract",
   "version": "1.0.0",
-  "description": "",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -9,7 +8,11 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "description": "",
+  "type": "module",
   "devDependencies": {
-    "hardhat": "^3.0.4"
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "chai": "^4.5.0",
+    "hardhat": "^2.26.0"
   }
 }

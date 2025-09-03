@@ -82,9 +82,10 @@ npm install pay-agents-sdk
 ```
 
 **For Python:**
-```bash
-pip install pay-agents-sdk```
 
+```bash
+pip install pay-agents-sdk
+```
 ### 第2步：Client端 - 创建并批准任务
 
 在你的后端代码中（例如Node.js或Python脚本），创建一个任务。
@@ -92,6 +93,7 @@ pip install pay-agents-sdk```
 **切勿在前端代码中暴露你的私钥！** 建议使用环境变量来管理。
 
 **JavaScript示例 (`client.js`):**
+
 ```javascript
 const { PayAgentsSDK } = require('pay-agents-sdk');
 
