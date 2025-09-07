@@ -9,10 +9,10 @@
   "author": "",
   "license": "ISC",
   "description": "",
-  "type": "module",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.0",
     "chai": "^4.5.0",
+    "dotenv": "^17.2.2",
     "hardhat": "^2.26.0"
   },
   "dependencies": {
