@@ -7,26 +7,23 @@ import { ethers } from 'ethers';
 import { EventEmitter } from 'events';
 import { TaskEscrowERC20ABI, ERC20ABI } from './abi.js';
 import { TaskStatus, Networks, ContractAddresses, Defaults, Events } from './constants.js';
-import { 
-  MyceliumError, 
-  ValidationError, 
-  NetworkError, 
-  ContractError, 
-  InsufficientFundsError,
-  TransactionTimeoutError 
+import {
+  MyceliumError,
+  ValidationError,
+  NetworkError,
+  ContractError,
+  InsufficientFundsError
 } from './errors.js';
 import {
   validateAddress,
   validateAmount,
   validateMetadataHash,
   validateTaskId,
-  validateNetwork,
   formatAmount,
   parseAmount,
   getNetworkByChainId,
   isSupportedNetwork,
   waitForTransaction,
-  retryWithBackoff,
   generateTaskMetadata,
   parseTaskMetadata
 } from './utils.js';
@@ -47,7 +44,27 @@ export class MyceliumSDK extends EventEmitter {
    */
   constructor(config = {}) {
     super();
-    
+
+    this._validateConfig(config);
+    this._mergeConfig(config);
+    this._initialize(config);
+  }
+
+  /**
+   * Validates the provided configuration
+   * @private
+   */
+  _validateConfig(config) {
+    if (!config.privateKey && !config.provider && !config.rpcUrl) {
+      throw new ValidationError('Either privateKey, provider, or rpcUrl must be provided');
+    }
+  }
+
+  /**
+   * Merges user config with defaults
+   * @private
+   */
+  _mergeConfig(config) {
     this.config = {
       chainId: Networks.POLYGON_AMOY.chainId,
       confirmations: Defaults.CONFIRMATION_BLOCKS,
@@ -56,14 +73,15 @@ export class MyceliumSDK extends EventEmitter {
       gasPriceMultiplier: Defaults.GAS_PRICE_MULTIPLIER,
       ...config.options
     };
+  }
 
-    // Initialize provider and signer
+  /**
+   * Initializes all SDK components
+   * @private
+   */
+  _initialize(config) {
     this._initializeProvider(config);
-    
-    // Initialize contracts
     this._initializeContracts();
-    
-    // Set up event listeners
     this._setupEventListeners();
   }
 
@@ -78,8 +96,11 @@ export class MyceliumSDK extends EventEmitter {
     } else if (config.provider) {
       // Frontend mode with browser provider
       this._initializeWithBrowserProvider(config);
+    } else if (config.rpcUrl) {
+      // Read-only mode with RPC URL
+      this._initializeWithRPC(config);
     } else {
-      throw new ValidationError('Either privateKey or provider must be provided');
+      throw new ValidationError('Either privateKey, provider, or rpcUrl must be provided');
     }
   }
 
@@ -99,7 +120,7 @@ export class MyceliumSDK extends EventEmitter {
       this.signer = new ethers.Wallet(config.privateKey, this.provider);
       this.isReadOnly = false;
       this.mode = 'privateKey';
-      
+
       this.config.chainId = network.chainId;
     } catch (error) {
       throw new ValidationError(`Failed to initialize with private key: ${error.message}`);
@@ -116,10 +137,32 @@ export class MyceliumSDK extends EventEmitter {
       this.signer = null; // Will be set when needed
       this.isReadOnly = false;
       this.mode = 'browser';
-      
+
       // Chain ID will be detected from provider
     } catch (error) {
       throw new ValidationError(`Failed to initialize with browser provider: ${error.message}`);
+    }
+  }
+
+  /**
+   * Initialize with RPC URL (read-only mode)
+   * @private
+   */
+  _initializeWithRPC(config) {
+    try {
+      const network = getNetworkByChainId(config.chainId || Networks.POLYGON_AMOY.chainId);
+      if (!network) {
+        throw new NetworkError(`Unsupported chain ID: ${config.chainId}`);
+      }
+
+      this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
+      this.signer = null;
+      this.isReadOnly = true;
+      this.mode = 'rpc';
+
+      this.config.chainId = network.chainId;
+    } catch (error) {
+      throw new ValidationError(`Failed to initialize with RPC: ${error.message}`);
     }
   }
 
@@ -183,10 +226,24 @@ export class MyceliumSDK extends EventEmitter {
   }
 
   /**
+   * Ensures the SDK is not in read-only mode for write operations
+   * @private
+   */
+  _ensureWriteMode() {
+    if (this.isReadOnly) {
+      throw new MyceliumError(
+        'SDK is in read-only mode. Write operations are not supported. ' +
+        'Initialize with privateKey or browser provider to enable write operations.'
+      );
+    }
+  }
+
+  /**
    * Gets a contract instance with signer for write operations
    * @private
    */
   async _getSignedContract() {
+    this._ensureWriteMode();
     const signer = await this._ensureSigner();
     return this.escrowContract.connect(signer);
   }
@@ -202,6 +259,8 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Task creation result
    */
   async createTask({ agentAddress, tokenAddress, amount, metadata, options = {} }) {
+    this._ensureWriteMode();
+
     // Validation
     validateAddress(agentAddress, 'agentAddress');
     validateAddress(tokenAddress, 'tokenAddress');
@@ -227,7 +286,7 @@ export class MyceliumSDK extends EventEmitter {
       // Check token balance and allowance
       const signer = await this._ensureSigner();
       const signerAddress = await signer.getAddress();
-      
+
       const balance = await tokenContract.balanceOf(signerAddress);
       if (balance < parsedAmount) {
         const symbol = await tokenContract.symbol().catch(() => 'TOKEN');
@@ -308,6 +367,7 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Approval result
    */
   async approvePayment(taskId, options = {}) {
+    this._ensureWriteMode();
     validateTaskId(taskId);
 
     try {
@@ -362,6 +422,7 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Claim result
    */
   async claimPayment(taskId, options = {}) {
+    this._ensureWriteMode();
     validateTaskId(taskId);
 
     try {
@@ -417,6 +478,7 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Cancellation result
    */
   async cancelTask(taskId, options = {}) {
+    this._ensureWriteMode();
     validateTaskId(taskId);
 
     try {
@@ -475,7 +537,7 @@ export class MyceliumSDK extends EventEmitter {
 
     try {
       const taskInfo = await this.escrowContract.getTaskInfo(taskId);
-      
+
       return {
         id: taskInfo.id.toString(),
         client: taskInfo.client,
@@ -550,7 +612,7 @@ export class MyceliumSDK extends EventEmitter {
 
     try {
       const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, this.provider);
-      
+
       const [name, symbol, decimals] = await Promise.all([
         tokenContract.name().catch(() => 'Unknown'),
         tokenContract.symbol().catch(() => 'UNKNOWN'),
@@ -644,6 +706,7 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Approval result
    */
   async approveToken(tokenAddress, amount, options = {}) {
+    this._ensureWriteMode();
     validateAddress(tokenAddress, 'tokenAddress');
     validateAmount(amount, 'amount');
 
@@ -819,9 +882,8 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {MyceliumSDK} SDK instance (read-only)
    */
   static withRPC(rpcUrl, options = {}) {
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
     return new MyceliumSDK({
-      provider,
+      rpcUrl,
       ...options
     });
   }
