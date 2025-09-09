@@ -331,7 +331,11 @@ export class MyceliumSDK extends EventEmitter {
         .map(log => {
           try {
             return this.escrowContract.interface.parseLog(log);
-          } catch {
+          } catch (parseError) {
+            // In development mode, warn about parsing failures
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('Failed to parse event log:', parseError.message, log);
+            }
             return null;
           }
         })
@@ -356,7 +360,7 @@ export class MyceliumSDK extends EventEmitter {
       if (error instanceof MyceliumError) {
         throw error;
       }
-      throw new ContractError(`Failed to create task: ${error.message}`, this.contractAddress);
+      throw new ContractError(`Failed to create task: ${error.message}`, this.contractAddress, error);
     }
   }
 
@@ -411,7 +415,7 @@ export class MyceliumSDK extends EventEmitter {
       if (error instanceof MyceliumError) {
         throw error;
       }
-      throw new ContractError(`Failed to approve payment: ${error.message}`, this.contractAddress);
+      throw new ContractError(`Failed to approve payment: ${error.message}`, this.contractAddress, error);
     }
   }
 
@@ -467,7 +471,7 @@ export class MyceliumSDK extends EventEmitter {
       if (error instanceof MyceliumError) {
         throw error;
       }
-      throw new ContractError(`Failed to claim payment: ${error.message}`, this.contractAddress);
+      throw new ContractError(`Failed to claim payment: ${error.message}`, this.contractAddress, error);
     }
   }
 
@@ -523,7 +527,7 @@ export class MyceliumSDK extends EventEmitter {
       if (error instanceof MyceliumError) {
         throw error;
       }
-      throw new ContractError(`Failed to cancel task: ${error.message}`, this.contractAddress);
+      throw new ContractError(`Failed to cancel task: ${error.message}`, this.contractAddress, error);
     }
   }
 
@@ -552,7 +556,7 @@ export class MyceliumSDK extends EventEmitter {
       if (error.message.includes('Task does not exist')) {
         throw new ValidationError(`Task ${taskId} does not exist`, 'taskId', taskId);
       }
-      throw new ContractError(`Failed to get task info: ${error.message}`, this.contractAddress);
+      throw new ContractError(`Failed to get task info: ${error.message}`, this.contractAddress, error);
     }
   }
 
@@ -570,7 +574,7 @@ export class MyceliumSDK extends EventEmitter {
       if (error.message.includes('Task does not exist')) {
         throw new ValidationError(`Task ${taskId} does not exist`, 'taskId', taskId);
       }
-      throw new ContractError(`Failed to get task metadata: ${error.message}`, this.contractAddress);
+      throw new ContractError(`Failed to get task metadata: ${error.message}`, this.contractAddress, error);
     }
   }
 
@@ -585,7 +589,7 @@ export class MyceliumSDK extends EventEmitter {
         count: count.toString()
       };
     } catch (error) {
-      throw new ContractError(`Failed to get task count: ${error.message}`, this.contractAddress);
+      throw new ContractError(`Failed to get task count: ${error.message}`, this.contractAddress, error);
     }
   }
 
@@ -604,7 +608,7 @@ export class MyceliumSDK extends EventEmitter {
         taskId: taskId.toString()
       };
     } catch (error) {
-      throw new ContractError(`Failed to check task existence: ${error.message}`, this.contractAddress);
+      throw new ContractError(`Failed to check task existence: ${error.message}`, this.contractAddress, error);
     }
   }
 
@@ -627,7 +631,7 @@ export class MyceliumSDK extends EventEmitter {
 
       return { name, symbol, decimals, address: tokenAddress };
     } catch (error) {
-      throw new ContractError(`Failed to get token info: ${error.message}`, tokenAddress);
+      throw new ContractError(`Failed to get token info: ${error.message}`, tokenAddress, error);
     }
   }
 
@@ -663,7 +667,7 @@ export class MyceliumSDK extends EventEmitter {
         address: tokenAddress
       };
     } catch (error) {
-      throw new ContractError(`Failed to get token balance: ${error.message}`, tokenAddress);
+      throw new ContractError(`Failed to get token balance: ${error.message}`, tokenAddress, error);
     }
   }
 
@@ -700,7 +704,7 @@ export class MyceliumSDK extends EventEmitter {
         owner: ownerAddress
       };
     } catch (error) {
-      throw new ContractError(`Failed to get token allowance: ${error.message}`, tokenAddress);
+      throw new ContractError(`Failed to get token allowance: ${error.message}`, tokenAddress, error);
     }
   }
 
@@ -745,7 +749,7 @@ export class MyceliumSDK extends EventEmitter {
       };
 
     } catch (error) {
-      throw new ContractError(`Failed to approve token: ${error.message}`, tokenAddress);
+      throw new ContractError(`Failed to approve token: ${error.message}`, tokenAddress, error);
     }
   }
 
@@ -766,7 +770,7 @@ export class MyceliumSDK extends EventEmitter {
         config: networkConfig
       };
     } catch (error) {
-      throw new NetworkError(`Failed to get network info: ${error.message}`);
+      throw new NetworkError(`Failed to get network info: ${error.message}`, error);
     }
   }
 
@@ -789,7 +793,7 @@ export class MyceliumSDK extends EventEmitter {
         }
       };
     } catch (error) {
-      throw new MyceliumError(`Failed to get account info: ${error.message}`);
+      throw new MyceliumError(`Failed to get account info: ${error.message}`, error);
     }
   }
 

@@ -8,15 +8,27 @@
 export class MyceliumError extends Error {
   /**
    * @param {string} message - Error message
-   * @param {string} code - Error code
+   * @param {string|Error} codeOrCause - Error code or original error
    * @param {*} details - Additional error details
    */
-  constructor(message, code = 'MYCELIUM_ERROR', details = null) {
+  constructor(message, codeOrCause = 'MYCELIUM_ERROR', details = null) {
     super(message);
     this.name = 'MyceliumError';
-    this.code = code;
-    this.details = details;
     this.timestamp = new Date().toISOString();
+    
+    // Handle both code and original error
+    if (codeOrCause instanceof Error) {
+      this.code = 'MYCELIUM_ERROR';
+      this.cause = codeOrCause;
+      this.details = details;
+      // Preserve original stack trace
+      if (codeOrCause.stack) {
+        this.stack = `${this.stack}\nCaused by: ${codeOrCause.stack}`;
+      }
+    } else {
+      this.code = codeOrCause;
+      this.details = details;
+    }
   }
 }
 
@@ -34,8 +46,13 @@ export class ValidationError extends MyceliumError {
  * Network-related errors
  */
 export class NetworkError extends MyceliumError {
-  constructor(message, networkDetails = null) {
-    super(message, 'NETWORK_ERROR', networkDetails);
+  constructor(message, networkDetailsOrCause = null) {
+    if (networkDetailsOrCause instanceof Error) {
+      super(message, networkDetailsOrCause);
+      this.code = 'NETWORK_ERROR';
+    } else {
+      super(message, 'NETWORK_ERROR', networkDetailsOrCause);
+    }
     this.name = 'NetworkError';
   }
 }
@@ -44,8 +61,20 @@ export class NetworkError extends MyceliumError {
  * Smart contract interaction errors
  */
 export class ContractError extends MyceliumError {
-  constructor(message, contractAddress = null, transactionHash = null) {
-    super(message, 'CONTRACT_ERROR', { contractAddress, transactionHash });
+  constructor(message, contractAddressOrCause = null, transactionHashOrCause = null) {
+    // Handle different parameter combinations
+    if (contractAddressOrCause instanceof Error) {
+      super(message, contractAddressOrCause);
+      this.code = 'CONTRACT_ERROR';
+    } else if (transactionHashOrCause instanceof Error) {
+      super(message, transactionHashOrCause, { contractAddress: contractAddressOrCause });
+      this.code = 'CONTRACT_ERROR';
+    } else {
+      super(message, 'CONTRACT_ERROR', { 
+        contractAddress: contractAddressOrCause, 
+        transactionHash: transactionHashOrCause 
+      });
+    }
     this.name = 'ContractError';
   }
 }

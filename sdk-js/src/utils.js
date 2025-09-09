@@ -247,6 +247,10 @@ export function parseTaskMetadata(metadataHash) {
     // Otherwise, return as-is (could be IPFS hash, etc.)
     return { hash: metadataHash };
   } catch (error) {
+    // In development mode, warn about parsing failures
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('Failed to parse task metadata:', error.message, metadataHash);
+    }
     return null;
   }
 }
