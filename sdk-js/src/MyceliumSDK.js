@@ -576,12 +576,14 @@ export class MyceliumSDK extends EventEmitter {
 
   /**
    * Gets the total number of tasks created
-   * @returns {Promise<string>} Total task count
+   * @returns {Promise<Object>} Task count information
    */
   async getTaskCount() {
     try {
       const count = await this.escrowContract.getTaskCount();
-      return count.toString();
+      return {
+        count: count.toString()
+      };
     } catch (error) {
       throw new ContractError(`Failed to get task count: ${error.message}`, this.contractAddress);
     }
@@ -590,13 +592,17 @@ export class MyceliumSDK extends EventEmitter {
   /**
    * Checks if a task exists
    * @param {string|number} taskId - Task ID to check
-   * @returns {Promise<boolean>} True if task exists
+   * @returns {Promise<Object>} Task existence information
    */
   async taskExists(taskId) {
     validateTaskId(taskId);
 
     try {
-      return await this.escrowContract.taskExists(taskId);
+      const exists = await this.escrowContract.taskExists(taskId);
+      return {
+        exists,
+        taskId: taskId.toString()
+      };
     } catch (error) {
       throw new ContractError(`Failed to check task existence: ${error.message}`, this.contractAddress);
     }
@@ -650,8 +656,8 @@ export class MyceliumSDK extends EventEmitter {
       ]);
 
       return {
-        raw: balance.toString(),
-        formatted: formatAmount(balance, decimals),
+        amountRaw: balance.toString(),
+        amountFormatted: formatAmount(balance, decimals),
         decimals,
         symbol,
         address: tokenAddress
@@ -686,8 +692,8 @@ export class MyceliumSDK extends EventEmitter {
       ]);
 
       return {
-        raw: allowance.toString(),
-        formatted: formatAmount(allowance, decimals),
+        amountRaw: allowance.toString(),
+        amountFormatted: formatAmount(allowance, decimals),
         decimals,
         symbol,
         spender: this.contractAddress,
@@ -777,8 +783,8 @@ export class MyceliumSDK extends EventEmitter {
       return {
         address,
         balance: {
-          raw: balance.toString(),
-          formatted: formatAmount(balance, 18),
+          amountRaw: balance.toString(),
+          amountFormatted: formatAmount(balance, 18),
           symbol: 'ETH' // This should be updated based on network
         }
       };
