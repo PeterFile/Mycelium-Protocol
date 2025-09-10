@@ -4,7 +4,7 @@
   "description": "JavaScript SDK for Mycelium Protocol - Stripe for AI Agents",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
-  "types": "dist/index.d.ts",
+  "types": "src/types.d.ts",
   "files": [
     "dist",
     "src",

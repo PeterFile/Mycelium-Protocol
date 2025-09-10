@@ -256,11 +256,15 @@ export class MyceliumSDK extends EventEmitter {
    * @param {string|number} params.amount - Amount of tokens to lock (in token units)
    * @param {string|Object} params.metadata - Task metadata (string or object)
    * @param {Object} [params.options] - Transaction options
-   * @returns {Promise<Object>} Task creation result
+   * @param {boolean} [params.options.autoApprove=false] - Automatically approve tokens if allowance insufficient
+   * @param {boolean} [params.options.estimateGas=true] - Whether to estimate gas automatically
+   * @returns {Promise<Object>} Task creation result with optional approval transaction
    */
   async createTask({ agentAddress, tokenAddress, amount, metadata, options = {} }) {
     this._ensureNotDestroyed();
     this._ensureWriteMode();
+
+    const { autoApprove = false, estimateGas = true, ...txOptions } = options;
 
     // Validation
     validateAddress(agentAddress, 'agentAddress');
@@ -279,12 +283,12 @@ export class MyceliumSDK extends EventEmitter {
     }
 
     try {
-      // Get token contract for decimals and approval check
+      // Get token contract for decimals and balance check
       const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, this.provider);
       const decimals = await tokenContract.decimals();
       const parsedAmount = parseAmount(amount, decimals);
 
-      // Check token balance and allowance
+      // Check token balance
       const signer = await this._ensureSigner();
       const signerAddress = await signer.getAddress();
 
@@ -298,24 +302,41 @@ export class MyceliumSDK extends EventEmitter {
         );
       }
 
-      const allowance = await tokenContract.allowance(signerAddress, this.contractAddress);
-      if (allowance < parsedAmount) {
+      // Check and handle token allowance
+      const allowanceResult = await this.checkAndApproveToken(tokenAddress, amount, {
+        autoApprove,
+        ...txOptions
+      });
+
+      if (!allowanceResult.isAllowanceSufficient && !autoApprove) {
         throw new ContractError(
-          `Insufficient token allowance. Please approve ${formatAmount(parsedAmount, decimals)} tokens first.`,
+          `Insufficient token allowance. Current: ${formatAmount(allowanceResult.currentAllowance, decimals)}, Required: ${formatAmount(parsedAmount, decimals)}. Use autoApprove: true or call approveToken() first.`,
           tokenAddress
         );
       }
 
-      // Execute transaction
+      // Execute transaction with gas estimation
       const contract = await this._getSignedContract();
+
+      // Estimate gas if enabled
+      let gasLimit = txOptions.gasLimit || this.config.gasLimit;
+      if (estimateGas && !txOptions.gasLimit) {
+        gasLimit = await this._estimateGas(
+          contract,
+          'createTask',
+          [agentAddress, tokenAddress, parsedAmount, metadataHash],
+          txOptions
+        );
+      }
+
       const tx = await contract.createTask(
         agentAddress,
         tokenAddress,
         parsedAmount,
         metadataHash,
         {
-          gasLimit: options.gasLimit || this.config.gasLimit,
-          ...options
+          gasLimit,
+          ...txOptions
         }
       );
 
@@ -348,14 +369,22 @@ export class MyceliumSDK extends EventEmitter {
 
       const taskId = taskCreatedEvent.args.taskId;
 
-      return {
+      const result = {
         taskId: taskId.toString(),
         transactionHash: tx.hash,
         blockNumber: receipt.blockNumber,
         gasUsed: receipt.gasUsed.toString(),
         effectiveGasPrice: receipt.effectiveGasPrice?.toString(),
-        metadata: parseTaskMetadata(metadataHash)
+        metadata: parseTaskMetadata(metadataHash),
+        gasEstimated: estimateGas
       };
+
+      // Include approval transaction info if auto-approval was used
+      if (allowanceResult.approvalTransaction) {
+        result.approvalTransaction = allowanceResult.approvalTransaction;
+      }
+
+      return result;
 
     } catch (error) {
       if (error instanceof MyceliumError) {
@@ -638,16 +667,86 @@ export class MyceliumSDK extends EventEmitter {
   }
 
   /**
-   * Approves tokens for the escrow contract
+   * Estimates gas for a contract method call
+   * @private
+   */
+  async _estimateGas(contract, methodName, args, options = {}) {
+    try {
+      const estimatedGas = await contract[methodName].estimateGas(...args, options);
+      // Add 20% buffer to reduce failure probability
+      const gasWithBuffer = (estimatedGas * BigInt(120)) / BigInt(100);
+      return gasWithBuffer;
+    } catch (error) {
+      // Fallback to default gas limit if estimation fails
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`Gas estimation failed for ${methodName}:`, error.message);
+      }
+      return BigInt(this.config.gasLimit);
+    }
+  }
+
+  /**
+   * Checks if token allowance is sufficient and optionally approves if needed
+   * @param {string} tokenAddress - Token contract address
+   * @param {string|number} amount - Required amount
+   * @param {Object} [options] - Options
+   * @param {boolean} [options.autoApprove=false] - Automatically approve if allowance insufficient
+   * @returns {Promise<Object>} Allowance check result
+   */
+  async checkAndApproveToken(tokenAddress, amount, options = {}) {
+    this._ensureNotDestroyed();
+    this._ensureWriteMode();
+
+    const { autoApprove = false } = options;
+
+    try {
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, this.provider);
+      const decimals = await tokenContract.decimals();
+      const parsedAmount = parseAmount(amount, decimals);
+
+      const signer = await this._ensureSigner();
+      const signerAddress = await signer.getAddress();
+
+      const currentAllowance = await tokenContract.allowance(signerAddress, this.contractAddress);
+      const isAllowanceSufficient = currentAllowance >= parsedAmount;
+
+      const result = {
+        tokenAddress,
+        requiredAmount: parsedAmount.toString(),
+        currentAllowance: currentAllowance.toString(),
+        isAllowanceSufficient,
+        needsApproval: !isAllowanceSufficient
+      };
+
+      if (!isAllowanceSufficient && autoApprove) {
+        console.log(`Auto-approving ${formatAmount(parsedAmount, decimals)} tokens...`);
+        const approvalResult = await this.approveToken(tokenAddress, amount, options);
+        result.approvalTransaction = approvalResult;
+        result.isAllowanceSufficient = true;
+        result.needsApproval = false;
+      }
+
+      return result;
+    } catch (error) {
+      throw new ContractError(`Failed to check token allowance: ${error.message}`, tokenAddress, error);
+    }
+  }
+
+  /**
+   * Approves tokens for the escrow contract with gas estimation
    * @param {string} tokenAddress - Token contract address
    * @param {string|number} amount - Amount to approve (in token units)
    * @param {Object} [options] - Transaction options
+   * @param {boolean} [options.estimateGas=true] - Whether to estimate gas automatically
    * @returns {Promise<Object>} Approval result
    */
   async approveToken(tokenAddress, amount, options = {}) {
+    this._ensureNotDestroyed();
     this._ensureWriteMode();
     validateAddress(tokenAddress, 'tokenAddress');
     validateAmount(amount, 'amount');
+
+    const { estimateGas = true, ...txOptions } = options;
 
     try {
       const tokenContract = new ethers.Contract(tokenAddress, ERC20ABI, this.provider);
@@ -657,9 +756,20 @@ export class MyceliumSDK extends EventEmitter {
       const signer = await this._ensureSigner();
       const signedTokenContract = tokenContract.connect(signer);
 
+      // Estimate gas if enabled
+      let gasLimit = txOptions.gasLimit || this.config.gasLimit;
+      if (estimateGas && !txOptions.gasLimit) {
+        gasLimit = await this._estimateGas(
+          signedTokenContract,
+          'approve',
+          [this.contractAddress, parsedAmount],
+          txOptions
+        );
+      }
+
       const tx = await signedTokenContract.approve(this.contractAddress, parsedAmount, {
-        gasLimit: options.gasLimit || this.config.gasLimit,
-        ...options
+        gasLimit,
+        ...txOptions
       });
 
       const receipt = await waitForTransaction(
@@ -674,7 +784,8 @@ export class MyceliumSDK extends EventEmitter {
         blockNumber: receipt.blockNumber,
         gasUsed: receipt.gasUsed.toString(),
         effectiveGasPrice: receipt.effectiveGasPrice?.toString(),
-        approvedAmount: formatAmount(parsedAmount, decimals)
+        approvedAmount: formatAmount(parsedAmount, decimals),
+        gasEstimated: estimateGas
       };
 
     } catch (error) {
@@ -786,6 +897,8 @@ export class MyceliumSDK extends EventEmitter {
     this._ensureWriteMode();
     validateTaskId(taskId);
 
+    const { estimateGas = true, ...txOptions } = options;
+
     try {
       // Get task info and validate
       const task = await this.getTask(taskId);
@@ -795,11 +908,23 @@ export class MyceliumSDK extends EventEmitter {
       // Run operation-specific validation
       validationFn(task, signerAddress);
 
-      // Execute transaction
+      // Execute transaction with gas estimation
       const contract = await this._getSignedContract();
+
+      // Estimate gas if enabled
+      let gasLimit = txOptions.gasLimit || this.config.gasLimit;
+      if (estimateGas && !txOptions.gasLimit) {
+        gasLimit = await this._estimateGas(
+          contract,
+          contractMethodName,
+          [taskId],
+          txOptions
+        );
+      }
+
       const tx = await contract[contractMethodName](taskId, {
-        gasLimit: options.gasLimit || this.config.gasLimit,
-        ...options
+        gasLimit,
+        ...txOptions
       });
 
       // Wait for confirmation
@@ -815,7 +940,8 @@ export class MyceliumSDK extends EventEmitter {
         transactionHash: tx.hash,
         blockNumber: receipt.blockNumber,
         gasUsed: receipt.gasUsed.toString(),
-        effectiveGasPrice: receipt.effectiveGasPrice?.toString()
+        effectiveGasPrice: receipt.effectiveGasPrice?.toString(),
+        gasEstimated: estimateGas
       };
 
     } catch (error) {
