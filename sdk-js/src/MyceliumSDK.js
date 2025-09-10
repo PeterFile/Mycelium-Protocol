@@ -259,6 +259,7 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Task creation result
    */
   async createTask({ agentAddress, tokenAddress, amount, metadata, options = {} }) {
+    this._ensureNotDestroyed();
     this._ensureWriteMode();
 
     // Validation
@@ -371,52 +372,22 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Approval result
    */
   async approvePayment(taskId, options = {}) {
-    this._ensureWriteMode();
-    validateTaskId(taskId);
+    this._ensureNotDestroyed();
 
-    try {
-      // Verify task exists and caller is client
-      const task = await this.getTask(taskId);
-      const signer = await this._ensureSigner();
-      const signerAddress = await signer.getAddress();
-
-      if (task.client.toLowerCase() !== signerAddress.toLowerCase()) {
-        throw new ValidationError('Only the task client can approve payment', 'caller', signerAddress);
-      }
-
-      if (task.status !== TaskStatus.CREATED) {
-        throw new ValidationError(`Task status must be CREATED, current status: ${task.status}`, 'status', task.status);
-      }
-
-      // Execute transaction
-      const contract = await this._getSignedContract();
-      const tx = await contract.approvePayment(taskId, {
-        gasLimit: options.gasLimit || this.config.gasLimit,
-        ...options
-      });
-
-      // Wait for confirmation
-      const receipt = await waitForTransaction(
-        this.provider,
-        tx.hash,
-        this.config.confirmations,
-        this.config.timeout
-      );
-
-      return {
-        taskId: taskId.toString(),
-        transactionHash: tx.hash,
-        blockNumber: receipt.blockNumber,
-        gasUsed: receipt.gasUsed.toString(),
-        effectiveGasPrice: receipt.effectiveGasPrice?.toString()
-      };
-
-    } catch (error) {
-      if (error instanceof MyceliumError) {
-        throw error;
-      }
-      throw new ContractError(`Failed to approve payment: ${error.message}`, this.contractAddress, error);
-    }
+    return this._executeTaskOperation(
+      taskId,
+      'approve payment',
+      (task, signerAddress) => {
+        if (task.client.toLowerCase() !== signerAddress.toLowerCase()) {
+          throw new ValidationError('Only the task client can approve payment', 'caller', signerAddress);
+        }
+        if (task.status !== TaskStatus.CREATED) {
+          throw new ValidationError(`Task status must be CREATED, current status: ${task.status}`, 'status', task.status);
+        }
+      },
+      'approvePayment',
+      options
+    );
   }
 
   /**
@@ -426,53 +397,31 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Claim result
    */
   async claimPayment(taskId, options = {}) {
-    this._ensureWriteMode();
-    validateTaskId(taskId);
+    this._ensureNotDestroyed();
 
-    try {
-      // Verify task exists and caller is agent
-      const task = await this.getTask(taskId);
-      const signer = await this._ensureSigner();
-      const signerAddress = await signer.getAddress();
+    // Get task info first to include amount in result
+    const task = await this.getTask(taskId);
 
-      if (task.agent.toLowerCase() !== signerAddress.toLowerCase()) {
-        throw new ValidationError('Only the task agent can claim payment', 'caller', signerAddress);
-      }
+    const result = await this._executeTaskOperation(
+      taskId,
+      'claim payment',
+      (task, signerAddress) => {
+        if (task.agent.toLowerCase() !== signerAddress.toLowerCase()) {
+          throw new ValidationError('Only the task agent can claim payment', 'caller', signerAddress);
+        }
+        if (task.status !== TaskStatus.APPROVED) {
+          throw new ValidationError(`Task status must be APPROVED, current status: ${task.status}`, 'status', task.status);
+        }
+      },
+      'claimPayment',
+      options
+    );
 
-      if (task.status !== TaskStatus.APPROVED) {
-        throw new ValidationError(`Task status must be APPROVED, current status: ${task.status}`, 'status', task.status);
-      }
-
-      // Execute transaction
-      const contract = await this._getSignedContract();
-      const tx = await contract.claimPayment(taskId, {
-        gasLimit: options.gasLimit || this.config.gasLimit,
-        ...options
-      });
-
-      // Wait for confirmation
-      const receipt = await waitForTransaction(
-        this.provider,
-        tx.hash,
-        this.config.confirmations,
-        this.config.timeout
-      );
-
-      return {
-        taskId: taskId.toString(),
-        transactionHash: tx.hash,
-        blockNumber: receipt.blockNumber,
-        gasUsed: receipt.gasUsed.toString(),
-        effectiveGasPrice: receipt.effectiveGasPrice?.toString(),
-        amount: task.amount
-      };
-
-    } catch (error) {
-      if (error instanceof MyceliumError) {
-        throw error;
-      }
-      throw new ContractError(`Failed to claim payment: ${error.message}`, this.contractAddress, error);
-    }
+    // Add amount to result
+    return {
+      ...result,
+      amount: task.amount
+    };
   }
 
   /**
@@ -482,53 +431,31 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Cancellation result
    */
   async cancelTask(taskId, options = {}) {
-    this._ensureWriteMode();
-    validateTaskId(taskId);
+    this._ensureNotDestroyed();
 
-    try {
-      // Verify task exists and caller is client
-      const task = await this.getTask(taskId);
-      const signer = await this._ensureSigner();
-      const signerAddress = await signer.getAddress();
+    // Get task info first to include refund amount in result
+    const task = await this.getTask(taskId);
 
-      if (task.client.toLowerCase() !== signerAddress.toLowerCase()) {
-        throw new ValidationError('Only the task client can cancel the task', 'caller', signerAddress);
-      }
+    const result = await this._executeTaskOperation(
+      taskId,
+      'cancel task',
+      (task, signerAddress) => {
+        if (task.client.toLowerCase() !== signerAddress.toLowerCase()) {
+          throw new ValidationError('Only the task client can cancel the task', 'caller', signerAddress);
+        }
+        if (task.status !== TaskStatus.CREATED) {
+          throw new ValidationError(`Task status must be CREATED, current status: ${task.status}`, 'status', task.status);
+        }
+      },
+      'cancelTaskAndRefund',
+      options
+    );
 
-      if (task.status !== TaskStatus.CREATED) {
-        throw new ValidationError(`Task status must be CREATED, current status: ${task.status}`, 'status', task.status);
-      }
-
-      // Execute transaction
-      const contract = await this._getSignedContract();
-      const tx = await contract.cancelTaskAndRefund(taskId, {
-        gasLimit: options.gasLimit || this.config.gasLimit,
-        ...options
-      });
-
-      // Wait for confirmation
-      const receipt = await waitForTransaction(
-        this.provider,
-        tx.hash,
-        this.config.confirmations,
-        this.config.timeout
-      );
-
-      return {
-        taskId: taskId.toString(),
-        transactionHash: tx.hash,
-        blockNumber: receipt.blockNumber,
-        gasUsed: receipt.gasUsed.toString(),
-        effectiveGasPrice: receipt.effectiveGasPrice?.toString(),
-        refundAmount: task.amount
-      };
-
-    } catch (error) {
-      if (error instanceof MyceliumError) {
-        throw error;
-      }
-      throw new ContractError(`Failed to cancel task: ${error.message}`, this.contractAddress, error);
-    }
+    // Add refund amount to result
+    return {
+      ...result,
+      refundAmount: task.amount
+    };
   }
 
   /**
@@ -537,6 +464,7 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Task information
    */
   async getTask(taskId) {
+    this._ensureNotDestroyed();
     validateTaskId(taskId);
 
     try {
@@ -583,6 +511,7 @@ export class MyceliumSDK extends EventEmitter {
    * @returns {Promise<Object>} Task count information
    */
   async getTaskCount() {
+    this._ensureNotDestroyed();
     try {
       const count = await this.escrowContract.getTaskCount();
       return {
@@ -784,12 +713,16 @@ export class MyceliumSDK extends EventEmitter {
       const address = await signer.getAddress();
       const balance = await this.provider.getBalance(address);
 
+      // Get network info to determine native currency symbol
+      const networkInfo = await this.getNetworkInfo();
+      const nativeSymbol = networkInfo.config?.nativeCurrency?.symbol || 'ETH';
+
       return {
         address,
         balance: {
           amountRaw: balance.toString(),
           amountFormatted: formatAmount(balance, 18),
-          symbol: 'ETH' // This should be updated based on network
+          symbol: nativeSymbol
         }
       };
     } catch (error) {
@@ -846,13 +779,116 @@ export class MyceliumSDK extends EventEmitter {
   }
 
   /**
+   * Common helper for task operations (approve, claim, cancel)
+   * @private
+   */
+  async _executeTaskOperation(taskId, operationName, validationFn, contractMethodName, options = {}) {
+    this._ensureWriteMode();
+    validateTaskId(taskId);
+
+    try {
+      // Get task info and validate
+      const task = await this.getTask(taskId);
+      const signer = await this._ensureSigner();
+      const signerAddress = await signer.getAddress();
+
+      // Run operation-specific validation
+      validationFn(task, signerAddress);
+
+      // Execute transaction
+      const contract = await this._getSignedContract();
+      const tx = await contract[contractMethodName](taskId, {
+        gasLimit: options.gasLimit || this.config.gasLimit,
+        ...options
+      });
+
+      // Wait for confirmation
+      const receipt = await waitForTransaction(
+        this.provider,
+        tx.hash,
+        this.config.confirmations,
+        this.config.timeout
+      );
+
+      return {
+        taskId: taskId.toString(),
+        transactionHash: tx.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+        effectiveGasPrice: receipt.effectiveGasPrice?.toString()
+      };
+
+    } catch (error) {
+      if (error instanceof MyceliumError) {
+        throw error;
+      }
+      throw new ContractError(`Failed to ${operationName}: ${error.message}`, this.contractAddress, error);
+    }
+  }
+
+  /**
    * Cleanup resources
    */
   destroy() {
+    // Mark as destroyed first to prevent new operations
+    this._destroyed = true;
+
+    // Clean up contract event listeners
     if (this.escrowContract) {
-      this.escrowContract.removeAllListeners();
+      try {
+        this.escrowContract.removeAllListeners();
+      } catch (error) {
+        // Silent cleanup - RPC errors during cleanup are expected
+      }
     }
+
+    // Clean up SDK event listeners
     this.removeAllListeners();
+
+    // Clean up any timers or intervals
+    if (this._cleanupTasks) {
+      this._cleanupTasks.forEach(cleanup => {
+        try {
+          cleanup();
+        } catch (error) {
+          // Silent cleanup - don't throw during destruction
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('Error during cleanup:', error);
+          }
+        }
+      });
+      this._cleanupTasks = [];
+    }
+
+    // Clean up provider connections if possible
+    if (this.provider && typeof this.provider.destroy === 'function') {
+      try {
+        this.provider.destroy();
+      } catch (error) {
+        // Silent cleanup
+      }
+    }
+  }
+
+  /**
+   * Register a cleanup task to be executed on destroy
+   * @private
+   */
+  _registerCleanup(cleanupFn) {
+    if (!this._cleanupTasks) {
+      this._cleanupTasks = [];
+    }
+    this._cleanupTasks.push(cleanupFn);
+  }
+
+  /**
+   * Check if SDK has been destroyed
+   * @private
+   */
+  _ensureNotDestroyed() {
+    if (this._destroyed) {
+      throw new MyceliumError('SDK has been destroyed. Create a new instance to continue.');
+    }
   }
 
   /**
