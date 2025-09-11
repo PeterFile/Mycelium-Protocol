@@ -23,6 +23,9 @@ __pycache__/
 /smart-contract/coverage.json
 /smart-contract/typechain-types/
 
+# Jest coverage reports
+/sdk-js/coverage/
+
 # Log files
 npm-debug.log*
 yarn-debug.log*
@@ -30,3 +33,5 @@ yarn-error.log*
 
 /.kiro
 /sdk-js/dist
+sdk-js/SDK_COMMERCIAL_AUDIT.md
+sdk-js/TESTING.md
